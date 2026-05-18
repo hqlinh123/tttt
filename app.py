@@ -297,7 +297,7 @@ async def upload_voice(
     
     # Validate size
     content = await file.read()
-    if len(content) > 10 * 1024 * 1024:
+    if len(content) > 20 * 1024 * 1024:
         raise HTTPException(400, "File too large. Max 10MB")
     
     # Generate a clean filename
@@ -424,7 +424,7 @@ async def upload_audio(file: UploadFile = File(...)):
     
     # Validate size
     content = await file.read()
-    if len(content) > 10 * 1024 * 1024:
+    if len(content) > 20 * 1024 * 1024:
         raise HTTPException(400, "File too large. Max 10MB")
     
     # Save file
