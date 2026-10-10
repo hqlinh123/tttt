@@ -23,7 +23,8 @@ classifiers = [
 ]
 
 dependencies = [
-    "numpy>=1.24.0,<1.26.0",
+    "numpy>=1.26.4,<2",
+    "ml-dtypes>=0.4.0",
     "librosa==0.11.0",
     "s3tokenizer",
     "torch==2.6.0",
