@@ -28,6 +28,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
+from uvicorn import lifespan
+
+from app.core.config import settings
 
 # Try to import Viterbox with error handling
 try:
@@ -767,6 +770,61 @@ async def health_check():
 # MAIN
 # =========================================================
 
+def create_app() -> FastAPI:
+    """
+    Application Factory
+    - Production ready
+    - Test friendly
+    - Worker friendly
+    """
+    
+    app = FastAPI(
+        title=settings.APP_NAME,
+        version=settings.APP_VERSION,
+        description="AI Video REST API",
+        lifespan=lifespan,
+        docs_url="/docs" if settings.ENABLE_DOCS else None,
+        redoc_url="/redoc" if settings.ENABLE_DOCS else None,
+        openapi_url="/openapi.json" if settings.ENABLE_DOCS else None,
+    )
+    
+    # ---------------- CORS ----------------
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
+    # ---------------- Routers ----------------
+    app.include_router(
+        api_router,
+        prefix=settings.API_PREFIX,
+    )
+    
+    # ---------------- Root Endpoint ----------------
+    @app.get("/")
+    async def root():
+        return {
+            "message": "AI Video Backend API",
+            "version": settings.APP_VERSION,
+            "environment": settings.ENVIRONMENT,
+            "status": "running"
+        }
+    
+    # ---------------- Health Check ----------------
+    @app.get("/health")
+    async def health_check():
+        return {
+            "status": "healthy",
+            "timestamp": __import__('datetime').datetime.now().isoformat(),
+            "version": settings.APP_VERSION
+        }
+    
+    return app
+
+app = create_app()
 if __name__ == "__main__":
     import uvicorn
     

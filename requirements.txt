@@ -8,7 +8,6 @@ librosa==0.11.0
 scipy>=1.10.0
 soundfile>=0.12.0
 numpy>=1.24.0,<1.26.0
-gradio==5.44.1
 soe-vinorm>=0.3.2
 einops>=0.7.0
 conformer==0.3.2
@@ -20,3 +19,22 @@ pykakasi==2.3.0
 omegaconf==2.3.0
 # requirements.txt
 uvicorn==0.24.0
+psycopg2-binary==2.9.3
+sqlalchemy==1.4.49
+alembic==1.7.0
+pytest==6.2.5
+pytest-asyncio==0.18.3
+pytest-cov==2.12.1
+pytest-mock==3.6.1
+pytest-cov==2.12.1
+pytest-mock==3.6.1
+pytest-asyncio==0.18.3
+httpx==0.28.1
+jose==1.0.0
+passlib==1.7.4
+python-multipart==0.0.18
+python-jose==3.3.0
+bcrypt==3.2.0
+python-dotenv==0.21.0
+pydantic-settings==2.6.1
+pydantic==2.12
