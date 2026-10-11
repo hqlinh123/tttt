@@ -1,16 +1,10 @@
 # main.py
 
 from contextlib import asynccontextmanager
-import os
-from pathlib import Path
-import tempfile
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import logging
 
 from fastapi.staticfiles import StaticFiles
-import torch
-from yaml import warnings
 
 from app.api.router import api_router
 from app.core.config.settings import OUTPUT_DIR, UPLOAD_DIR, VIDEO_DIR, VIDEO_IMAGE_DIR, WAVS_DIR, settings

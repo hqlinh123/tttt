@@ -1,20 +1,11 @@
 # app/services/voice_service.py
-
-import hashlib
 import logging
-import shutil
-import subprocess
-import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from tempfile import TemporaryDirectory
-from typing import Optional, List, Dict, Any, AsyncGenerator, BinaryIO
 
-import edge_tts  # type: ignore
 import librosa
 import soundfile as sf
-import torch
 from fastapi import UploadFile, HTTPException, status, logger
 
 from app.core.config.settings import WAVS_DIR, settings
@@ -22,7 +13,6 @@ from app.domain.constants.voices import AVAILABLE_VOICES
 from app.domain.models.voices import TTSRequest, TTSResponse
 from app.helpers.file_manager import FileManager
 from app.infrastructure.repositories.audio_record_repository import AudioRecordRepository
-from viterbox.tts import Viterbox
 
 # Viterbox imports with proper error handling
 
@@ -31,41 +21,92 @@ logger = logging.getLogger(__name__)
 
 
 class VoiceService:
-    def __init__(self, voices_repository, config: dict = None):
+    def __init__(
+        self,
+        voices_repository,
+        config: dict = None,
+    ):
         """
-        Initialize VoiceService
-        
-        Args:
-            voices_repository: Repository for voice operations
-            config: Optional configuration dictionary
+        Initialize VoiceService.
+
+        IMPORTANT:
+        VoiceService does NOT import or initialize Viterbox.
+
+        Viterbox model must be lazy-loaded externally and injected
+        through config["model"] when required.
         """
+
         self.voices_repository = voices_repository
-        
-        # Default configuration
+
         if config is None:
             config = {}
-        
-        self.wavs_dir = Path(config.get("wavs_dir", "wavs"))
-        self.upload_dir = Path(config.get("upload_dir", "uploads"))
-        self.output_dir = Path(config.get("output_dir", "outputs"))
-        self.temp_dir = Path(config.get("temp_dir", "temp"))
-        self.device = config.get("device", "cpu")
-        self.viterbox_available = config.get("viterbox_available", False)
-        
-        # Initialize Viterbox if available
-        self.viterbox = None
-        if self.viterbox_available:
-            try:
-                self.viterbox = Viterbox(device=self.device)
-                logger.info(f"Viterbox initialized on {self.device}")
-            except Exception as e:
-                logger.error(f"Failed to initialize Viterbox: {e}")
-                self.viterbox_available = False
-        
-        # Ensure directories exist
-        for dir_path in [self.wavs_dir, self.upload_dir, self.output_dir, self.temp_dir]:
-            dir_path.mkdir(parents=True, exist_ok=True)
 
+        # Directories
+        self.wavs_dir = Path(
+            config.get(
+                "wavs_dir",
+                "wavs",
+            )
+        )
+
+        self.upload_dir = Path(
+            config.get(
+                "upload_dir",
+                "uploads",
+            )
+        )
+
+        self.output_dir = Path(
+            config.get(
+                "output_dir",
+                "outputs",
+            )
+        )
+
+        self.temp_dir = Path(
+            config.get(
+                "temp_dir",
+                "temp",
+            )
+        )
+
+        # Viterbox configuration
+        #
+        # IMPORTANT:
+        # Do NOT create Viterbox here.
+        self.viterbox = config.get("model")
+
+        self.device = config.get(
+            "device"
+        )
+
+        self.viterbox_available = (
+            self.viterbox is not None
+        )
+
+        # Ensure directories exist
+        for dir_path in [
+            self.wavs_dir,
+            self.upload_dir,
+            self.output_dir,
+            self.temp_dir,
+        ]:
+            dir_path.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+        if self.viterbox_available:
+            logger.info(
+                "VoiceService initialized with "
+                "Viterbox model on %s",
+                self.device,
+            )
+        else:
+            logger.debug(
+                "VoiceService initialized without "
+                "Viterbox model"
+            )
 
     def _api_path(self, path: str) -> str:
         """
@@ -289,16 +330,167 @@ class VoiceService:
     
     # ==================== TTS Methods ====================
     
-    async def text_to_speech(self, request: TTSRequest) -> TTSResponse:
-        """Convert text to speech using available TTS engine"""
-        if not self.viterbox_available or not self.viterbox:
+    async def text_to_speech(
+    self,
+    request: TTSRequest,
+) -> TTSResponse:
+        """
+        Convert text to speech using injected Viterbox model.
+        """
+
+        if self.viterbox is None:
             raise HTTPException(
-                status_code=503,
-                detail="TTS service not available. Viterbox not configured."
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "TTS service not available. "
+                    "Viterbox model has not been loaded."
+                ),
             )
-        
-        # Implementation would go here
-        pass
+
+        try:
+            import asyncio
+
+            ref_audio = getattr(
+                request,
+                "voice",
+                None,
+            )
+
+            if ref_audio:
+                ref_path = Path(ref_audio)
+
+                if not ref_path.exists():
+                    wav_path = (
+                        self.wavs_dir
+                        / ref_audio
+                    )
+
+                    upload_path = (
+                        self.upload_dir
+                        / ref_audio
+                    )
+
+                    if wav_path.exists():
+                        ref_path = wav_path
+
+                    elif upload_path.exists():
+                        ref_path = upload_path
+
+                    else:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=(
+                                f"Reference voice "
+                                f"'{ref_audio}' not found"
+                            ),
+                        )
+
+                ref_audio = str(ref_path)
+
+            wav = await asyncio.to_thread(
+                self.viterbox.generate,
+                text=request.text,
+                language=request.language,
+                audio_prompt=ref_audio,
+                exaggeration=request.exaggeration,
+                cfg_weight=request.cfg_weight,
+                temperature=request.temperature,
+                sentence_pause_ms=request.sentence_pause_ms,
+            )
+
+            if hasattr(wav, "cpu"):
+                audio_np = (
+                    wav[0]
+                    .cpu()
+                    .numpy()
+                )
+
+            elif isinstance(
+                wav,
+                (list, tuple),
+            ):
+                item = wav[0]
+
+                if hasattr(item, "cpu"):
+                    audio_np = (
+                        item
+                        .cpu()
+                        .numpy()
+                    )
+                else:
+                    audio_np = item
+
+            else:
+                audio_np = wav
+
+            audio_np, _ = librosa.effects.trim(
+                audio_np,
+                top_db=30,
+            )
+
+            filename = (
+                f"{uuid.uuid4().hex}.wav"
+            )
+
+            output_path = (
+                self.output_dir
+                / filename
+            )
+
+            sample_rate = getattr(
+                self.viterbox,
+                "sr",
+                24000,
+            )
+
+            sf.write(
+                output_path,
+                audio_np,
+                sample_rate,
+            )
+
+            duration = (
+                len(audio_np)
+                / sample_rate
+            )
+
+            return {
+                "success": True,
+                "message": "Generated successfully",
+                "audio_url": self._api_path(
+                    f"/viterbox/outputs/{filename}"
+                ),
+                "filename": filename,
+                "duration": round(
+                    duration,
+                    2,
+                ),
+                "text_length": len(
+                    request.text
+                ),
+                "language": request.language,
+                "voice_cloning": bool(
+                    ref_audio
+                ),
+                "voice_used": (
+                    Path(ref_audio).name
+                    if ref_audio
+                    else None
+                ),
+            }
+
+        except HTTPException:
+            raise
+
+        except Exception as e:
+            logger.exception(
+                "Viterbox TTS generation failed"
+            )
+
+            raise HTTPException(
+                status_code=500,
+                detail=str(e),
+            )
 
 
     async def get_generated_voices(self) -> dict:
